@@ -109,7 +109,7 @@ class VendorRepositoryTests(unittest.TestCase):
         ])
         self.assertEqual(len(calls), 2)
         for command in calls:
-            self.assertEqual(command[-1], 'https://github.com/DashSaman/MyTellPBX/releases/download/v7.7.0-r9/' + MIRROR.ASSET)
+            self.assertEqual(command[-1], 'https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9/' + MIRROR.ASSET)
             self.assertIn('--continue-at', command)
             self.assertEqual(command[command.index('--proto-redir') + 1], '=https')
         self.assertFalse((self.work / (MIRROR.ASSET + '.part')).exists())

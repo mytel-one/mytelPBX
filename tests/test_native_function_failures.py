@@ -108,16 +108,16 @@ mytel_native_step mytel_package_batch $'preinstalled\\nneeded\\nsecond' core
         result = self.shell('''
 mytel_terminal_banner
 check_tools(){ return 0; }
-update_os(){ return 18; }
+install_base_packages(){ return 18; }
 mytel_native_step check_tools
-mytel_native_step update_os
+mytel_native_step install_base_packages
 printf 'CONTINUED\\n'
 ''')
         self.assertEqual(result.returncode, 18)
         self.assertIn(b'Mytel.one', result.stdout)
         self.assertIn(b'[01/09]  Checking setup tools', result.stdout)
         self.assertIn(b'Done', result.stdout)
-        self.assertIn(b'[04/09]  Updating the operating system', result.stdout)
+        self.assertIn(b'[04/09]  Installing base packages', result.stdout)
         self.assertIn(b'Stopped', result.stderr)
         self.assertNotIn(b'CONTINUED', result.stdout)
 
@@ -141,16 +141,23 @@ mytel_package_batch 'alpha>=5.0.0-1 beta>=2.12.0-1 other' product
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b'Required module version missing', result.stderr)
 
-    def test_update_uses_a_single_system_transaction_and_preserves_its_status(self):
+    def test_online_install_limits_transactions_to_required_packages(self):
+        for name, data in [('inst1.txt', 'base-one base-two'), ('inst2.txt', 'product-core')]:
+            (self.base / name).write_text(data)
         result = self.shell('''
-yum(){ printf '%s\\n' "$*" >> "$MYTEL_NATIVE_WORK/calls"; return 42; }
-mytel_native_step update_os
-printf 'CONTINUED\\n'
+ADDPKGS=community-block-list
+dnf(){ echo UNEXPECTED_DNF; return 91; }
+yum(){ echo UNEXPECTED_YUM; return 91; }
+mytel_package_batch(){ printf '%s|%s\\n' "$2" "$1" >> "$MYTEL_NATIVE_WORK/calls"; }
+mytel_native_step install_base_packages
+mytel_native_step install_product_packages
 ''')
-        self.assertEqual(result.returncode, 42)
-        self.assertEqual((self.base / 'calls').read_text().splitlines(), ['-y update'])
-        self.assertNotIn(b'CONTINUED', result.stdout)
-        self.assertNotIn('no package to upgrade', self.log.read_text())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.base / 'calls').read_text().splitlines(),
+                         ['core|base-one base-two', 'product|product-core community-block-list'])
+        self.assertNotIn(b'UNEXPECTED', result.stdout)
+        self.assertIn(b'[04/09]  Installing base packages', result.stdout)
+        self.assertIn(b'[05/09]  Installing MytelPBX packages', result.stdout)
 
     def test_every_essential_post_install_failure_stops_before_later_stage(self):
         for failing in ('enable-mariadb', 'start-mariadb', 'set-root-pass', 'enable-httpd',
@@ -169,44 +176,91 @@ printf 'CONTINUED\\n'
                 self.assertNotIn(b'CONTINUED', result.stdout)
                 self.assertIn(b'stopped at post_install', result.stderr)
 
-    def test_native_remi_repair_precedes_every_module_operation(self):
-        result = self.shell('''
-dnf(){ printf 'DNF:%s\\n' "$*"; }
-repair_stub(){ printf 'REPAIR:%s\\n' "$*"; }
-mytel_native_step centos8_tweaks
+    def test_native_rpm_transactions_use_only_verified_local_sources(self):
+        system_repos = self.base / 'system-repos'
+        system_repos.mkdir()
+        (system_repos / 'Rocky.repo').write_text('original native OS source')
+        (system_repos / 'Issabel.repo').write_text('previous configuration')
+        self.definitions = self.definitions.replace('/etc/yum.repos.d', system_repos.as_posix())
+        result = self.shell(r'''
+MYTEL_REQUIRE_MEDIA_REPOS=1
+MYTEL_MEDIA_ROOT="$MYTEL_NATIVE_WORK/media"
+MYTEL_MEDIA_MANIFEST_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+export BETAREPO='--setopt=reposdir=/untrusted --enablerepo=*'
+rpm(){ return 1; }
+dnf(){ printf '%s\n' "$@" > "$MYTEL_NATIVE_WORK/metadata-args"; }
+yum(){ printf '%s\n' "$@" > "$MYTEL_NATIVE_WORK/install-args"; }
+repair_stub(){
+  case "$3" in
+    */media.py)
+      printf '[mytel-platform]\nbaseurl=file:///verified/platform\nenabled=1\ngpgcheck=1\n'
+      printf 'MEDIA\n' >> "$MYTEL_NATIVE_WORK/verified";;
+    */vendor-mirror.py)
+      printf '[mytelpbx-packages]\nbaseurl=file:///verified/pbx\n' > "$5/Issabel.repo"
+      printf '[mytelpbx-builds]\nbaseurl=file:///verified/builds\n' > "$5/Issabel5.repo"
+      : > "$5/commercial-addons.repo";;
+    *) return 77;;
+  esac
+}
+mytel_check_install_repositories || exit $?
+printf '%s' "$MYTEL_NATIVE_REPO_DIR" > "$MYTEL_NATIVE_WORK/preflight-path"
+mytel_native_step add_repos || exit $?
+bash -c 'test -d "$MYTEL_NATIVE_REPO_DIR"' || exit 92
+printf 'httpd\n' > "$MYTEL_NATIVE_WORK/inst1.txt"
+printf 'pbx-core\n' > "$MYTEL_NATIVE_WORK/inst2.txt"
+ADDPKGS=community-block-list
+mytel_native_step install_base_packages || exit $?
+cp "$MYTEL_NATIVE_WORK/install-args" "$MYTEL_NATIVE_WORK/base-args"
+mytel_native_step install_product_packages || exit $?
+printf '%s' "$MYTEL_NATIVE_REPO_DIR" > "$MYTEL_NATIVE_WORK/repo-path"
 ''')
         self.assertEqual(result.returncode, 0, result.stderr)
-        events = result.stdout.decode().splitlines() + self.log.read_text().splitlines()
-        # Repair goes to the console; native dnf output goes to its private log.
-        self.assertTrue(any('repair-repository-transport.py' in line for line in events))
-        self.assertIn('DNF:module enable php:remi-7.4 -y', events)
-        # Execute a stronger causal guard: module operations refuse unless repair
-        # has actually run; the first Remi package transaction remains permitted.
-        result = self.shell('''
-REPAIRED=0
-repair_stub(){ REPAIRED=1; }
-dnf(){ case "$*" in 'install -y https://rpms.remirepo.net/'*) return 0;; *) [ "$REPAIRED" = 1 ];; esac; }
-mytel_native_step centos8_tweaks
-''')
-        self.assertEqual(result.returncode, 0, result.stderr)
+        repo = Path((self.base / 'repo-path').read_text())
+        preflight = Path((self.base / 'preflight-path').read_text())
+        self.assertNotEqual(preflight, repo)
+        self.assertEqual((system_repos / 'Rocky.repo').read_text(), 'original native OS source')
+        self.assertIn('file:///verified/pbx', (system_repos / 'Issabel.repo').read_text())
+        self.assertEqual((self.base / 'vendor-repos-before/Issabel.repo').read_text(), 'previous configuration')
+        self.assertFalse((system_repos / 'Mytel-platform.repo').exists())
+        platform = (repo / 'Mytel-platform.repo').read_text()
+        self.assertIn('module_hotfixes=1', platform)
+        self.assertIn('gpgcheck=1', platform)
+        self.assertEqual((self.base / 'verified').read_text().splitlines(), ['MEDIA'])
+        for file in ('metadata-args', 'base-args', 'install-args'):
+            args = (self.base / file).read_text().splitlines()
+            self.assertIn('--noplugins', args)
+            self.assertIn('--disablerepo=*', args)
+            self.assertEqual([arg for arg in args if arg.startswith('--setopt=reposdir=')],
+                             ['--setopt=reposdir=' + (preflight if file == 'metadata-args' else repo).as_posix()])
+            self.assertIn('--setopt=cachedir=' + self.base.as_posix() + '/dnf-cache', args)
+            self.assertEqual([arg for arg in args if arg.startswith('--enablerepo=')],
+                             ['--enablerepo=mytelpbx-packages', '--enablerepo=mytelpbx-builds',
+                              '--enablerepo=mytel-platform'])
+            self.assertFalse(any(arg.startswith(('http:', 'https:')) or arg == 'update' for arg in args))
+        self.assertEqual((self.base / 'metadata-args').read_text().splitlines()[-1], 'makecache')
+        self.assertEqual((self.base / 'base-args').read_text().splitlines()[-1], 'httpd')
+        self.assertEqual((self.base / 'install-args').read_text().splitlines()[-2:], ['pbx-core', 'community-block-list'])
 
-    def test_native_remi_failure_stops_before_system_update(self):
-        for failure in ('install', 'repair', 'module', 'remi', 'powertools', 'devel'):
-            with self.subTest(command=failure):
-                result = self.shell('FAIL=' + shlex.quote(failure) + '''
-repair_stub(){ [ "$FAIL" != repair ]; }
-dnf(){ case "$*" in 'install '*) key=install;; 'module '*) key=module;; *'--set-enabled remi') key=remi;; *'--set-enabled powertools') key=powertools;; *'--set-enabled devel') key=devel;; *'check-upgrade') key=check-upgrade;; *) return 99;; esac; [ "$FAIL" != "$key" ]; }
-mytel_native_step centos8_tweaks
-printf 'CONTINUED\\n'
+    def test_missing_or_invalid_release_media_stops_before_package_manager(self):
+        for var in ('', 'a' * 64):
+            with self.subTest(manifest=bool(var)):
+                result = self.shell('MYTEL_MEDIA_MANIFEST_SHA256=' + shlex.quote(var) + r'''
+MYTEL_MEDIA_ROOT="$MYTEL_NATIVE_WORK/media"
+MYTEL_REQUIRE_MEDIA_REPOS=1
+rpm(){ return 0; }
+yum(){ touch "$MYTEL_NATIVE_WORK/escape"; }
+dnf(){ touch "$MYTEL_NATIVE_WORK/escape"; }
+repair_stub(){
+  case "$3" in
+    */media.py) printf '[partial]\nenabled=1\n'; return 77;;
+    *) touch "$MYTEL_NATIVE_WORK/escape";;
+  esac
+}
+mytel_check_install_repositories
 ''')
                 self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn(b'CONTINUED', result.stdout)
-        result = self.shell('''
-repair_stub(){ :; }
-dnf(){ case "$*" in *'check-upgrade') return 100;; *) return 0;; esac; }
-mytel_native_step centos8_tweaks
-''')
-        self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse((self.base / 'verified-platform.repo').exists())
+                self.assertFalse((self.base / 'escape').exists())
 
 
 if __name__ == '__main__':

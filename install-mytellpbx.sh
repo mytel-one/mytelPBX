@@ -11,7 +11,7 @@ MYTELLPBX_VERSION="7.7.0"
 MYTELLPBX_BUNDLE="mytelpbx-bundle-7.7.0.tgz"
 # Immutable payload pin from the reviewed clean-source bundle assembly.
 MYTELLPBX_BUNDLE_SHA256="a5408d279ff27f67248b479d64cc44a589fee0309a69bda251c2a970989aae3e"
-MYTELLPBX_GITHUB="https://github.com/DashSaman/MyTellPBX"
+MYTELLPBX_GITHUB="https://github.com/mytel-one/mytelPBX"
 MYTELLPBX_RELEASE_TAG="v7.7.0-r9"
 MYTELLPBX_BUNDLE_URL="${MYTELL_BUNDLE_URL:-${MYTELLPBX_GITHUB}/releases/download/${MYTELLPBX_RELEASE_TAG}/${MYTELLPBX_BUNDLE}}"
 
@@ -145,17 +145,22 @@ main() {
     download_bundle
     extract_bundle
     export MYTEL_BUNDLE_ROOT MYTEL_NATIVE_WORK MYTEL_PYTHON
-    MYTEL_KEEP_DNF_CACHE=0
-    if [ "$#" = 0 ] && [ -z "${MYTEL_MEDIA_ROOT:-}" ]; then MYTEL_KEEP_DNF_CACHE=1; fi
-    export MYTEL_KEEP_DNF_CACHE
-    if [ -z "${MYTEL_MEDIA_ROOT:-}" ] || [ "$#" = 1 ]; then
+    if [ -n "${MYTEL_MEDIA_ROOT:-}" ] && [ "$#" = 0 ]; then
+        bash "$MYTEL_BUNDLE_ROOT/installer/vendor-native/run-offline.sh"
+    else
+        local media_profile
+        local -a media_fields
+        media_profile=$("$MYTEL_PYTHON" -I -B "$MYTEL_BUNDLE_ROOT/installer/vendor-native/release-media.py" "$MYTEL_NATIVE_WORK") \
+            || die 'Installation dependency verification failed.'
+        mapfile -t media_fields <<< "$media_profile"
+        [ "${#media_fields[@]}" = 2 ] || die 'Invalid installation dependencies.'
+        MYTEL_MEDIA_ROOT="${media_fields[0]}"
+        MYTEL_MEDIA_MANIFEST_SHA256="${media_fields[1]}"
+        MYTEL_KEEP_DNF_CACHE=0
+        export MYTEL_MEDIA_ROOT MYTEL_MEDIA_MANIFEST_SHA256 MYTEL_KEEP_DNF_CACHE
         bash "$MYTEL_BUNDLE_ROOT/installer/vendor-native/mytelpbx-netinstall.sh" --check-repositories \
             || die "Repository checks failed. See $MYTEL_NATIVE_WORK/repository-checks."
         [ "$#" = 0 ] || return 0
-    fi
-    if [ -n "${MYTEL_MEDIA_ROOT:-}" ]; then
-        bash "$MYTEL_BUNDLE_ROOT/installer/vendor-native/run-offline.sh"
-    else
         source "$MYTEL_BUNDLE_ROOT/installer/vendor-native/terminal-ui.sh" || die 'Cannot load the terminal UI.'
         source "$MYTEL_BUNDLE_ROOT/installer/vendor-native/online-credentials.sh" || die 'Cannot load the password prompt.'
         mytel_terminal_banner

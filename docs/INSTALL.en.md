@@ -10,7 +10,7 @@ Use a **fresh Rocky Linux 8.10 Minimal x86_64 server**, root access, an interact
 console or SSH terminal, and working Internet access. To install the published revision, run:
 
 ```bash
-curl -fsSL -o install-mytellpbx.sh https://github.com/DashSaman/MyTellPBX/releases/download/v7.7.0-r9/install-mytellpbx.sh && bash install-mytellpbx.sh
+curl -fsSL -o install-mytellpbx.sh https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9/install-mytellpbx.sh && bash install-mytellpbx.sh
 ```
 
 The script is downloaded to a file before Bash starts, so setup retains
@@ -52,8 +52,9 @@ separate root-only record at `/etc/myteldesk/initial-admin.txt`.
 The terminal shows the current package, observed download and transaction counters,
 and the result of each installation phase.
 
-DNF updates the system in one transaction and resolves the base and PBX package sets
-in two batches. In an interactive terminal, progress updates in place. During Desk
+DNF installs the required platform and PBX packages in two batches from
+local copies of the release package sources. Apply regular Rocky updates
+through your normal system maintenance schedule. In an interactive terminal, progress updates in place. During Desk
 startup the installer reports database initialization when the service journal confirms it.
 The PBX batch requests the core modules with their native minimum versions and
 excludes the optional license manager, including as an indirect dependency.
@@ -144,10 +145,11 @@ usual ports below are planning references, not a claim that rules were installed
 | 10000–20000 UDP | RTP, according to Asterisk configuration |
 
 The installer downloads the PBX package snapshot from the versioned release in
-DashSaman/MyTellPBX. It checks the archive size and SHA-256 before configuring
+mytel-one/mytelPBX. It checks the archive size and SHA-256 before configuring
 a local package source. DNF verifies the publisher signatures. Asterisk
-20.12.0-3.mytel.el8 and framework 5.0.0-6 are included. Rocky Linux, EPEL, Remi
-and the MytelDesk runtime dependencies still require Internet access.
+20.12.0-3.mytel.el8 and framework 5.0.0-6 are included. The same GitHub release
+hosts the Rocky, EPEL, Remi and MytelDesk dependencies. During setup DNF uses only
+the verified local copies of the release repositories.
 
 The software installation includes MytelDesk and selects PJSIP by default.
 Asterisk is built from the 20.12.0 sources and the distribution's module changes.

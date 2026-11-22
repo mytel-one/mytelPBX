@@ -144,13 +144,16 @@ def install_media_packages(bundle, diagnostics, command):
     render = '''MYTEL_BUNDLE_ROOT=$1 MYTEL_NATIVE_WORK=$2 MYTEL_PYTHON=$3
 shift 3
 source "$MYTEL_BUNDLE_ROOT/installer/vendor-native/terminal-ui.sh" || exit 1
-mytel_run_dnf iso timeout --kill-after=5 300 "$@" || exit $?
+kind=iso
+if [[ -n ${MYTEL_NATIVE_REPO_DIR:-} ]]; then kind=packages; fi
+mytel_run_dnf "$kind" timeout --kill-after=5 300 "$@" || exit $?
 '''
     try:
         run(['bash', '-c', render, 'mytel-iso-packages', str(bundle), str(diagnostics.parent), sys.executable]
             + command, timeout=310)
     except (ValueError, subprocess.TimeoutExpired):
-        raise ValueError('Package installation from ISO stopped. Details: ' + str(diagnostics)) from None
+        source = 'verified installation media' if os.environ.get('MYTEL_NATIVE_REPO_DIR') else 'ISO'
+        raise ValueError('Package installation from ' + source + ' stopped. Details: ' + str(diagnostics)) from None
 
 
 def wait_native_ready(requested=None):
@@ -678,9 +681,10 @@ def install_ownership_hook(bundle, backup, root=Path('/')):
 def install(bundle, backup_root, requested=None, media=None, public_url=None, check=False):
     root = Path('/')
     offline = media is not None
+    hosted_media = offline and bool(os.environ.get('MYTEL_NATIVE_REPO_DIR'))
 
     def progress(message):
-        print(('    · ' if offline else 'Mytel addons: ') + message, flush=True)
+        print(('    · ' if offline and not hosted_media else 'Mytel addons: ') + message, flush=True)
 
     progress('Checking base services and credentials')
     for item in [bundle] + list(bundle.rglob('*')):
@@ -755,12 +759,17 @@ def install(bundle, backup_root, requested=None, media=None, public_url=None, ch
                                       recover_firstboot=os.environ.get('MYTEL_NATIVE_FRESH_SETUP') == '1')
     receipt.write_text(json.dumps(state, indent=2), encoding='utf-8')
     if offline:
-        progress('Installing the MytelDesk runtime from ISO')
+        progress('Installing the MytelDesk runtime from verified packages' if hosted_media else
+                 'Installing the MytelDesk runtime from ISO')
         with tempfile.TemporaryDirectory(prefix='repos-', dir=str(backup)) as repository:
             repo = media.repo_text().replace('enabled=1\n', 'enabled=1\nincludepkgs=' + ','.join(SUPPLEMENTAL_PACKAGES) + '\n')
+            if hosted_media:
+                repo = repo.replace('enabled=1\n', 'enabled=1\nmodule_hotfixes=1\n')
             (Path(repository) / 'mytel-supplemental.repo').write_text(repo, encoding='utf-8')
             command = ['dnf', '--disablerepo=*', '--setopt=reposdir=' + repository,
                        '--setopt=install_weak_deps=False', '--setopt=obsoletes=False']
+            if hosted_media:
+                command.append('--noplugins')
             command += ['--enablerepo=' + entry['id'] for entry in media.manifest['repositories']]
             install_media_packages(bundle, diagnostics, command + ['-y', 'install', 'python3.11', 'python3.11-pip'])
     # The pinned standalone installer owns Desk's own backups, secrets, rollback,
@@ -770,7 +779,7 @@ def install(bundle, backup_root, requested=None, media=None, public_url=None, ch
     desk.install(pin, cache, public_url, launcher_source=bundle / 'modules/mytellpbxopdesk', media=media)
     state['phase'] = 'desk-ready-ownership-hook-pending'
     receipt.write_text(json.dumps(state, indent=2), encoding='utf-8')
-    if offline:
+    if offline and not hosted_media:
         print('\n  [4/4]  Check installed services', flush=True)
     progress('Checking installed file permissions and service health')
     install_ownership_hook(bundle, backup)

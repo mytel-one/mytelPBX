@@ -48,14 +48,14 @@
     }
   },
   "derivation_changes": [
-    "The online bootstrap checks active and planned repositories in an isolated DNF workspace before collecting confirmed credentials through a private pipe; PJSIP is selected unless the operator chooses SIP",
+    "The online bootstrap authenticates the released package sources and checks their local DNF metadata before collecting confirmed credentials through a private pipe. PJSIP is the default.",
     "Online packages select Persian Asterisk voice prompts and retain the required English GSM fallback. The native Community Realtime Block List is included and optional licensed selections are excluded",
     "English terminal phases and observed package output replace the online graphical gauge; native package diagnostics remain private",
     "MytelPBX / Mytel.one display labels; native executable, package, database and repository IDs remain unchanged",
     "Fix the derived online product to ASTVER=20 without a version dialog; derived ISO software metadata exposes only the native Asterisk 20 environment and group, preserving native language selection, remaining group data and immutable original RPM assets",
     "Use the reviewed MytelPBX GitHub release archive as the online source of PBX RPMs, with locally verified SHA-256, native signing keys and DNF signature checks",
     "Omit FOP2 and its initialization call, the upstream license manager and the separate G.729 binary package that contains only older Asterisk modules from the online selection",
-    "Use the existing narrow Remi HTTPS repository helper after the native Remi release installation",
+    "Resolve the base and product transactions against the verified release RPMs with a private DNF repository directory and explicit repository IDs. Dependency resolution can upgrade packages required by the PBX. No general OS update or external module activation runs.",
     "Keep native temporary package lists and logs in the bootstrap-created private workspace",
     "Propagate package, repository, database preparation and native password-tool failures before later stages or reboot",
     "In post_install, defer genuinely absent custom configuration to the following native --init even if RPMs have partially created a regular amportal.conf; reject symlink/wrong-type paths, preserve existing custom targets, and move only a regular sample without clobbering. Run amportal chown when its regular configuration exists and keep real failures fatal; defer ownership work only when that configuration is genuinely absent. Append the existing native cdr_mysql noload directive only when absent, with read/write errors fatal, so scoped pre-init recovery does not duplicate it",

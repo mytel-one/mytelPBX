@@ -118,6 +118,7 @@ function add_repos
     mkdir -m 0700 "$repo_dir" || return 1
     state_dir=/var/lib/mytelpbx/repository-snapshots/r9
   fi
+  mytel_platform_repos "$repo_dir" || return $?
   "$MYTEL_PYTHON" -I -B "$MYTEL_BUNDLE_ROOT/installer/vendor-native/vendor-mirror.py" \
     --repo-dir "$repo_dir" --state-dir "$state_dir" --workdir "$MYTEL_NATIVE_WORK" || return $?
   if [ "$#" = 0 ]; then
@@ -134,40 +135,22 @@ function add_repos
   fi
 }
 
-function centos8_tweaks {
-
-ROCKY_VERSION=$(cat /etc/redhat-release | awk '{print $4}' | awk -F. '{print $1}')
-
-echo "centos $ROCKY_VERSION tweaks start" >>"${MYTEL_NATIVE_WORK}/netinstall.log"
-grep -qxF 'fastestmirror=True' /etc/dnf/dnf.conf || echo "fastestmirror=True" >> /etc/dnf/dnf.conf
-mytel_run_dnf repositories dnf install -y https://rpms.remirepo.net/enterprise/remi-release-${ROCKY_VERSION}.rpm || return $?
-"${MYTEL_PYTHON}" -B "${MYTEL_BUNDLE_ROOT}/installer/repair-repository-transport.py" || return 1
-mytel_check_repository_sources --enable remi --enable powertools --enable devel || return $?
-mytel_run_dnf repositories dnf module enable php:remi-7.4 -y || return $?
-dnf config-manager --set-enabled remi &>>"${MYTEL_NATIVE_WORK}/netinstall.log" || return 1
-dnf config-manager --set-enabled powertools &>>"${MYTEL_NATIVE_WORK}/netinstall.log" || return 1
-dnf config-manager --set-enabled devel &>>"${MYTEL_NATIVE_WORK}/netinstall.log" || return 1
-echo "centos $ROCKY_VERSION tweaks end" >>"${MYTEL_NATIVE_WORK}/netinstall.log"
-}
-
 function additional_packages
 {
   # Install the community SIP block list without selecting licensed add-ons.
   ADDPKGS=issabel-packetbl
 }
 
-function update_os
-{
-  local -a repository_options=()
-  IFS=$' \t\n' read -r -a repository_options <<< "${BETAREPO:-}" || :
-  mytel_run_dnf update yum "${repository_options[@]}" -y update
-}
-
-function install_packages
+function install_base_packages
 {
   local packages
   packages=$(cat "${MYTEL_NATIVE_WORK}/inst1.txt") || return $?
-  mytel_package_batch "$packages" core || return $?
+  mytel_package_batch "$packages" core
+}
+
+function install_product_packages
+{
+  local packages
   packages=$(cat "${MYTEL_NATIVE_WORK}/inst2.txt") || return $?
   mytel_package_batch "$packages $ADDPKGS" product
 }
@@ -271,21 +254,41 @@ function mytel_restore_vendor_repos()
   done
 }
 
-function mytel_check_repository_sources()
+function mytel_platform_repos()
 {
-  local dnf_python=/usr/libexec/platform-python
-  [ -x "$dnf_python" ] || dnf_python="$MYTEL_PYTHON"
-  if [ "${MYTEL_KEEP_DNF_CACHE:-0}" = 1 ]; then set -- --keep-cache "$@"; fi
-  "$dnf_python" -I -B "${MYTEL_BUNDLE_ROOT}/installer/vendor-native/repository-preflight.py" "${MYTEL_NATIVE_WORK}" "$@"
+  local dir=$1 name ids temp
+  local checked="$MYTEL_NATIVE_WORK/verified-platform.repo"
+  if [[ -z ${MYTEL_MEDIA_ROOT:-} || ! ${MYTEL_MEDIA_MANIFEST_SHA256:-} =~ ^[0-9a-f]{64}$ ]]; then
+    printf 'Verified installation media is required.\n' >&2
+    return 1
+  fi
+  if [[ ! -f $checked ]]; then
+    temp=$(mktemp "$MYTEL_NATIVE_WORK/platform.XXXXXXXX") || return 1
+    "$MYTEL_PYTHON" -I -B "$MYTEL_BUNDLE_ROOT/installer/media.py" \
+      --root "$MYTEL_MEDIA_ROOT" --manifest-sha256 "$MYTEL_MEDIA_MANIFEST_SHA256" --repos \
+      | sed '/^enabled=1$/a module_hotfixes=1' > "$temp" || { rm -f -- "$temp"; return 1; }
+    mv -T -- "$temp" "$checked" || return 1
+  fi
+  ids=$(awk 'substr($0,1,1) == "[" { print substr($0,2,length($0)-2) }' "$checked") || return 1
+  [[ -n $ids ]] || return 1
+  MYTEL_NATIVE_REPO_IDS=(mytelpbx-packages mytelpbx-builds)
+  while IFS= read -r name; do
+    [[ $name =~ ^[A-Za-z0-9_-]+$ && $name != mytelpbx-packages && $name != mytelpbx-builds ]] || return 1
+    MYTEL_NATIVE_REPO_IDS+=("$name")
+  done <<< "$ids"
+  install -T -m 0600 -- "$checked" "$dir/Mytel-platform.repo" || return 1
+  export MYTEL_NATIVE_REPO_DIR="$dir"
 }
 
 function mytel_check_install_repositories()
 {
   local staged
   check_tools || return 1
-  staged=$(mktemp -d "${MYTEL_NATIVE_WORK}/planned-repos.XXXXXXXX") || return 1
+  staged=$(mktemp -d "$MYTEL_NATIVE_WORK/planned-repos.XXXXXXXX") || return 1
   add_repos "$staged" || return $?
-  mytel_check_repository_sources --staged-repos "$staged" --enable powertools --enable devel     --package-url https://rpms.remirepo.net/enterprise/remi-release-8.rpm
+  printf '  Checking %s verified package sources...\n' "${#MYTEL_NATIVE_REPO_IDS[@]}"
+  mytel_run_dnf repositories dnf \
+    "--setopt=persistdir=$MYTEL_NATIVE_WORK/preflight-dnf-state" "--setopt=logdir=$MYTEL_NATIVE_WORK" --refresh -y makecache
 }
 
 function mytel_addons()
@@ -316,12 +319,13 @@ function mytel_native_step()
 }
 
 # MYTEL_NATIVE_FLOW
+MYTEL_REQUIRE_MEDIA_REPOS=1
+source "${MYTEL_BUNDLE_ROOT}/installer/vendor-native/terminal-ui.sh" || exit 1
 if [ "$#" = 1 ] && [ "$1" = --check-repositories ]; then
   mytel_check_install_repositories
   exit $?
 fi
 [ "$#" = 0 ] || exit 1
-source "${MYTEL_BUNDLE_ROOT}/installer/vendor-native/terminal-ui.sh" || exit 1
 source "${MYTEL_BUNDLE_ROOT}/installer/vendor-native/online-credentials.sh" || exit 1
 mytel_receive_online_passwords || exit 1
 mytel_native_step check_tools
@@ -331,9 +335,8 @@ mytel_native_step select_language
 mytel_native_step sel_astver
 mytel_native_step additional_packages
 mytel_native_step generate_files
-mytel_native_step centos8_tweaks
-mytel_native_step update_os
-mytel_native_step install_packages
+mytel_native_step install_base_packages
+mytel_native_step install_product_packages
 mytel_native_step post_install
 mytel_native_step set_passwords
 mytel_native_step mytel_addons

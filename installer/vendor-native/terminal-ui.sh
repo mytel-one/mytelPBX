@@ -53,10 +53,9 @@ mytel_terminal_phase() {
     settings)                       label='Preparing the base system' ;;
     select_language)     number=02; label='Setting language defaults' ;;
     additional_packages)            label='Preparing the community package set' ;;
-    generate_files)                 label='Preparing package lists' ;;
-    centos8_tweaks)       number=03; label='Preparing the package manager' ;;
-    update_os)           number=04; label='Updating the operating system' ;;
-    install_packages)    number=05; label='Installing MytelPBX packages' ;;
+    generate_files)       number=03; label='Preparing package lists' ;;
+    install_base_packages)    number=04; label='Installing base packages' ;;
+    install_product_packages) number=05; label='Installing MytelPBX packages' ;;
     post_install)        number=06; label='Setting up base services' ;;
     set_passwords)       number=07; label='Applying passwords and SIP driver' ;;
     mytel_addons)        number=08; label='Setting up MytelPBX and MytelDesk' ;;
@@ -100,11 +99,25 @@ mytel_run_dnf() {
   local kind=$1 logger="${MYTEL_BUNDLE_ROOT}/installer/dnf-progress.py"
   local log="${MYTEL_NATIVE_WORK}/netinstall.log"
   local -a statuses
-  local restore_status=0 manager
+  local restore_status=0 manager repo
+  local -a options=()
   shift
-  if [[ ${MYTEL_KEEP_DNF_CACHE:-0} == 1 && ( $1 == yum || $1 == dnf ) ]]; then
+  if [[ $1 == yum || $1 == dnf ]]; then
     manager=$1; shift
-    set -- "$manager" "--setopt=cachedir=$MYTEL_NATIVE_WORK/dnf-cache" "$@"
+    if [[ ${MYTEL_REQUIRE_MEDIA_REPOS:-0} == 1 ]]; then
+      if [[ -z ${MYTEL_NATIVE_REPO_DIR:-} || ! -d $MYTEL_NATIVE_REPO_DIR || ${#MYTEL_NATIVE_REPO_IDS[@]} -eq 0 ]]; then
+        printf 'Verified package sources are not ready.\n' >&2
+        return 1
+      fi
+      options+=(--noplugins "--setopt=reposdir=$MYTEL_NATIVE_REPO_DIR" '--disablerepo=*')
+      for repo in "${MYTEL_NATIVE_REPO_IDS[@]}"; do
+        options+=("--enablerepo=$repo")
+      done
+    fi
+    if [[ ${MYTEL_REQUIRE_MEDIA_REPOS:-0} == 1 || ${MYTEL_KEEP_DNF_CACHE:-0} == 1 ]]; then
+      options+=("--setopt=cachedir=$MYTEL_NATIVE_WORK/dnf-cache")
+    fi
+    set -- "$manager" "${options[@]}" "$@"
   fi
   "${MYTEL_PYTHON}" -B "$logger" --log "$log" --kind "$kind" --check-log || return 1
   LC_ALL=C PYTHONUNBUFFERED=1 "$@" 2>&1 | MYTELL_CONSOLE_ENGLISH=1 PYTHONIOENCODING=utf-8 "${MYTEL_PYTHON}" -B "$logger" --log "$log" --kind "$kind" --detail
@@ -141,7 +154,6 @@ mytel_package_batch() {
   local floor_pattern='^[A-Za-z0-9][A-Za-z0-9_.+-]*>=[0-9]+(\.[0-9]+)*-[0-9]+$'
   local -a packages=() floors=() missing=() repository_options=()
   IFS=$' \t\n' read -r -d '' -a packages <<< "$1" || :
-  IFS=$' \t\n' read -r -a repository_options <<< "${BETAREPO:-}" || :
   case "$2" in
     core) title='Base packages' ;;
     product) title='Product packages'; repository_options+=(--exclude=issabel-license --exclude=fop2) ;;

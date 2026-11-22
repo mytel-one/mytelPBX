@@ -21,7 +21,7 @@ OPENSSL = 'C:/Program Files/Git/usr/bin/openssl.exe' if os.name == 'nt' else shu
 VENDOR_SHA = 'd0793041a422981293d74153f1aa56b29ff9803d18ee3319a53865b5b6132d46'
 FLOW = ['check_tools', 'add_repos', 'settings', 'select_language',
         'sel_astver', 'additional_packages', 'generate_files',
-        'centos8_tweaks', 'update_os', 'install_packages',
+        'install_base_packages', 'install_product_packages',
         'post_install', 'set_passwords', 'mytel_addons', 'cleanup',
         'mytel_verify_addons', 'bye', 'reboot']
 
@@ -73,6 +73,9 @@ class NativeSourceTests(unittest.TestCase):
         self.assertNotIn('geoip-update.py', source)
         self.assertIn('vendor-mirror.py', source)
         self.assertNotIn('repo.us.issabel.org', source)
+        self.assertNotRegex(source, r'(?:https?|ftp)://')
+        self.assertNotIn('config-manager', source)
+        self.assertNotIn('module enable', source)
         self.assertNotIn('repo.issabel.org', source)
         self.assertNotIn('mirror.issabel.org', source)
         self.assertNotIn('\nfop2\n', source)
@@ -787,7 +790,7 @@ class NativeFlowTests(unittest.TestCase):
         self.assertEqual(events, FLOW)
 
     def test_any_failed_native_stage_stops_before_later_stage_or_reboot(self):
-        for failed in ['settings', 'update_os', 'install_packages', 'post_install',
+        for failed in ['settings', 'install_base_packages', 'install_product_packages', 'post_install',
                        'set_passwords', 'mytel_addons']:
             with self.subTest(failed=failed):
                 result, events = self.fixture(failed)

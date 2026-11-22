@@ -13,7 +13,7 @@ import sys
 import tarfile
 import tempfile
 
-RELEASE = 'https://github.com/DashSaman/MyTellPBX/releases/download/v7.7.0-r9/'
+RELEASE = 'https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9/'
 ASSET = 'mytelpbx-vendor-el8-x86_64.tar.gz'
 FILES = ('Issabel.repo', 'Issabel5.repo', 'commercial-addons.repo')
 PROJECT_KEY = 'mytelpbx-rpm-signing.asc'

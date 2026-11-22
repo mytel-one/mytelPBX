@@ -71,6 +71,7 @@ def derive(original):
     mkdir -m 0700 "$repo_dir" || return 1
     state_dir=/var/lib/mytelpbx/repository-snapshots/r9
   fi
+  mytel_platform_repos "$repo_dir" || return $?
   "$MYTEL_PYTHON" -I -B "$MYTEL_BUNDLE_ROOT/installer/vendor-native/vendor-mirror.py" \\
     --repo-dir "$repo_dir" --state-dir "$state_dir" --workdir "$MYTEL_NATIVE_WORK" || return $?
   if [ "$#" = 0 ]; then
@@ -114,36 +115,20 @@ def derive(original):
     beta = source[source.index('function enable_beta'):source.index('function set_passwords()')]
     source = replace(source, beta, '')
 
-    remi = 'dnf module enable php:remi-7.4 -y'
-    for command in ('dnf install -y https://rpms.remirepo.net/enterprise/remi-release-${ROCKY_VERSION}.rpm ', remi):
-        source = replace(source, command + ' &>>"${MYTEL_NATIVE_WORK}/netinstall.log"',
-                         'mytel_run_dnf repositories ' + command.rstrip() + ' || return $?')
-    for command in (
-        'dnf config-manager --set-enabled remi',
-        'dnf config-manager --set-enabled powertools',
-        'dnf config-manager --set-enabled devel',
-    ):
-        old = command + ' &>>"${MYTEL_NATIVE_WORK}/netinstall.log"'
-        source = replace(source, old, old + ' || return 1')
-    remi_progress = 'mytel_run_dnf repositories ' + remi
-    source = replace(source, remi_progress,
-                     '"${MYTEL_PYTHON}" -B "${MYTEL_BUNDLE_ROOT}/installer/repair-repository-transport.py" || return 1\n'
-                     'mytel_check_repository_sources --enable remi --enable powertools --enable devel || return $?\n'
-                     + remi_progress)
-    source = replace(source, 'dnf -y check-upgrade &>>"${MYTEL_NATIVE_WORK}/netinstall.log"\n', '')
+    # Modular packages are selected from the verified platform snapshot.
+    tweaks = source[source.index('function centos8_tweaks {'):source.index('function additional_packages')]
+    source = replace(source, tweaks, '')
     transactions = source[source.index('function yum_gauge'):source.index('function post_install')]
-    source = replace(source, transactions, '''function update_os
-{
-  local -a repository_options=()
-  IFS=$' \\t\\n' read -r -a repository_options <<< "${BETAREPO:-}" || :
-  mytel_run_dnf update yum "${repository_options[@]}" -y update
-}
-
-function install_packages
+    source = replace(source, transactions, '''function install_base_packages
 {
   local packages
   packages=$(cat "${MYTEL_NATIVE_WORK}/inst1.txt") || return $?
-  mytel_package_batch "$packages" core || return $?
+  mytel_package_batch "$packages" core
+}
+
+function install_product_packages
+{
+  local packages
   packages=$(cat "${MYTEL_NATIVE_WORK}/inst2.txt") || return $?
   mytel_package_batch "$packages $ADDPKGS" product
 }
@@ -211,11 +196,13 @@ function install_packages
     definitions, flow = source[:footer], source[footer:]
     flow = replace(flow, '\ncheck_dialog\n', '\ncheck_tools\n')
     flow = replace(flow, '\nclean_yum\n', '\n')
+    flow = replace(flow, '\ncentos8_tweaks\n', '\n')
+    flow = replace(flow, '\nupdate_os\ninstall_packages\n', '\ninstall_base_packages\ninstall_product_packages\n')
     flow = replace(flow, '\nwelcome\n', '\n', count=2)
     flow = replace(flow, '#if enable_beta\n#then\n#    BETAREPO="--enablerepo=issabel-beta"\n#fi\n', '')
     flow = flow.replace('\nset_passwords\n', '\nset_passwords\nmytel_addons\n')
     flow = replace(flow, '\ncleanup\n', '\ncleanup\nmytel_verify_addons\n')
-    flow = re.sub(r'(?m)^(check_tools|add_repos|settings|select_language|sel_astver|additional_packages|generate_files|centos8_tweaks|update_os|install_packages|post_install|set_passwords|mytel_addons|cleanup|mytel_verify_addons|bye|reboot)$',
+    flow = re.sub(r'(?m)^(check_tools|add_repos|settings|select_language|sel_astver|additional_packages|generate_files|install_base_packages|install_product_packages|post_install|set_passwords|mytel_addons|cleanup|mytel_verify_addons|bye|reboot)$',
                   r'mytel_native_step \1', flow)
     helpers = '''
 function mytel_restore_vendor_repos()
@@ -230,22 +217,41 @@ function mytel_restore_vendor_repos()
   done
 }
 
-function mytel_check_repository_sources()
+function mytel_platform_repos()
 {
-  local dnf_python=/usr/libexec/platform-python
-  [ -x "$dnf_python" ] || dnf_python="$MYTEL_PYTHON"
-  if [ "${MYTEL_KEEP_DNF_CACHE:-0}" = 1 ]; then set -- --keep-cache "$@"; fi
-  "$dnf_python" -I -B "${MYTEL_BUNDLE_ROOT}/installer/vendor-native/repository-preflight.py" "${MYTEL_NATIVE_WORK}" "$@"
+  local dir=$1 name ids temp
+  local checked="$MYTEL_NATIVE_WORK/verified-platform.repo"
+  if [[ -z ${MYTEL_MEDIA_ROOT:-} || ! ${MYTEL_MEDIA_MANIFEST_SHA256:-} =~ ^[0-9a-f]{64}$ ]]; then
+    printf 'Verified installation media is required.\\n' >&2
+    return 1
+  fi
+  if [[ ! -f $checked ]]; then
+    temp=$(mktemp "$MYTEL_NATIVE_WORK/platform.XXXXXXXX") || return 1
+    "$MYTEL_PYTHON" -I -B "$MYTEL_BUNDLE_ROOT/installer/media.py" \\
+      --root "$MYTEL_MEDIA_ROOT" --manifest-sha256 "$MYTEL_MEDIA_MANIFEST_SHA256" --repos \\
+      | sed '/^enabled=1$/a module_hotfixes=1' > "$temp" || { rm -f -- "$temp"; return 1; }
+    mv -T -- "$temp" "$checked" || return 1
+  fi
+  ids=$(awk 'substr($0,1,1) == "[" { print substr($0,2,length($0)-2) }' "$checked") || return 1
+  [[ -n $ids ]] || return 1
+  MYTEL_NATIVE_REPO_IDS=(mytelpbx-packages mytelpbx-builds)
+  while IFS= read -r name; do
+    [[ $name =~ ^[A-Za-z0-9_-]+$ && $name != mytelpbx-packages && $name != mytelpbx-builds ]] || return 1
+    MYTEL_NATIVE_REPO_IDS+=("$name")
+  done <<< "$ids"
+  install -T -m 0600 -- "$checked" "$dir/Mytel-platform.repo" || return 1
+  export MYTEL_NATIVE_REPO_DIR="$dir"
 }
 
 function mytel_check_install_repositories()
 {
   local staged
   check_tools || return 1
-  staged=$(mktemp -d "${MYTEL_NATIVE_WORK}/planned-repos.XXXXXXXX") || return 1
+  staged=$(mktemp -d "$MYTEL_NATIVE_WORK/planned-repos.XXXXXXXX") || return 1
   add_repos "$staged" || return $?
-  mytel_check_repository_sources --staged-repos "$staged" --enable powertools --enable devel \
-    --package-url https://rpms.remirepo.net/enterprise/remi-release-8.rpm
+  printf '  Checking %s verified package sources...\\n' "${#MYTEL_NATIVE_REPO_IDS[@]}"
+  mytel_run_dnf repositories dnf \\
+    "--setopt=persistdir=$MYTEL_NATIVE_WORK/preflight-dnf-state" "--setopt=logdir=$MYTEL_NATIVE_WORK" --refresh -y makecache
 }
 
 function mytel_addons()
@@ -275,12 +281,13 @@ function mytel_native_step()
   fi
 }
 '''
-    load_online = '''if [ "$#" = 1 ] && [ "$1" = --check-repositories ]; then
+    load_online = '''MYTEL_REQUIRE_MEDIA_REPOS=1
+source "${MYTEL_BUNDLE_ROOT}/installer/vendor-native/terminal-ui.sh" || exit 1
+if [ "$#" = 1 ] && [ "$1" = --check-repositories ]; then
   mytel_check_install_repositories
   exit $?
 fi
 [ "$#" = 0 ] || exit 1
-source "${MYTEL_BUNDLE_ROOT}/installer/vendor-native/terminal-ui.sh" || exit 1
 source "${MYTEL_BUNDLE_ROOT}/installer/vendor-native/online-credentials.sh" || exit 1
 mytel_receive_online_passwords || exit 1
 '''

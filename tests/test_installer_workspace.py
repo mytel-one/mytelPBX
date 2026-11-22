@@ -31,11 +31,14 @@ extract_bundle(){
     MYTEL_BUNDLE_ROOT="$MYTEL_NATIVE_WORK/payload"
     local native="$MYTEL_BUNDLE_ROOT/installer/vendor-native"
     mkdir -p "$native" || return 1
+    printf '%s\\n' 'import sys' 'sys.stdout.buffer.write((sys.argv[1] + "/release-media" + chr(10) + "a" * 64 + chr(10)).encode())' \\
+        > "$native/release-media.py"
     printf '%s\\n' 'mytel_terminal_banner(){ :; }' > "$native/terminal-ui.sh"
     printf '%s\\n' 'mytel_collect_online_passwords(){ printf "%s\\n" Fixture-DB Fixture-Panel pjsip; }' \
         > "$native/online-credentials.sh"
 }
 bash(){
+  [[ "$MYTEL_MEDIA_ROOT" == "$MYTEL_NATIVE_WORK/release-media" && "$MYTEL_MEDIA_MANIFEST_SHA256" =~ ^a{64}$ ]] || return 97
   if [[ "${2:-}" == --check-repositories ]]; then
     printf 'REPOSITORIES_CHECKED'
     return ''' + str(repo_status) + '''
