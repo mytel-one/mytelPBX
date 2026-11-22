@@ -1,7 +1,7 @@
 #!/bin/bash
 # MytelPBX / Mytel.one - verified native Issabel installer bootstrap.
 # Run in an interactive root terminal on fresh Rocky Linux 8.10 x86_64.
-# Installs Asterisk 20 only. Checks repositories before asking for passwords.
+# Installs Asterisk 20 only. Collects access settings before large downloads.
 # Native completion reboots the server.
 # Verified source and logs remain in the printed private workspace.
 set -u
@@ -150,6 +150,13 @@ main() {
     else
         local media_profile
         local -a media_fields
+        if [ "$#" = 0 ]; then
+            source "$MYTEL_BUNDLE_ROOT/installer/vendor-native/terminal-ui.sh" || die 'Cannot load the terminal UI.'
+            source "$MYTEL_BUNDLE_ROOT/installer/vendor-native/online-credentials.sh" || die 'Cannot load the password prompt.'
+            mytel_terminal_banner
+            mytel_receive_online_passwords 3< <(mytel_collect_online_passwords) \
+                || die 'Access setup stopped.'
+        fi
         media_profile=$("$MYTEL_PYTHON" -I -B "$MYTEL_BUNDLE_ROOT/installer/vendor-native/release-media.py" "$MYTEL_NATIVE_WORK") \
             || die 'Installation dependency verification failed.'
         mapfile -t media_fields <<< "$media_profile"
@@ -159,15 +166,13 @@ main() {
         MYTEL_KEEP_DNF_CACHE=0
         export MYTEL_MEDIA_ROOT MYTEL_MEDIA_MANIFEST_SHA256 MYTEL_KEEP_DNF_CACHE
         bash "$MYTEL_BUNDLE_ROOT/installer/vendor-native/mytelpbx-netinstall.sh" --check-repositories \
-            || die "Repository checks failed. See $MYTEL_NATIVE_WORK/repository-checks."
+            || die "Repository checks failed. See $MYTEL_NATIVE_WORK/netinstall.log."
         [ "$#" = 0 ] || return 0
-        source "$MYTEL_BUNDLE_ROOT/installer/vendor-native/terminal-ui.sh" || die 'Cannot load the terminal UI.'
-        source "$MYTEL_BUNDLE_ROOT/installer/vendor-native/online-credentials.sh" || die 'Cannot load the password prompt.'
-        mytel_terminal_banner
         bash "$MYTEL_BUNDLE_ROOT/installer/vendor-native/mytelpbx-netinstall.sh" \
-            3< <(mytel_collect_online_passwords)
+            3< <(printf '%s\n%s\n%s\n' "$_mytel_db_password" "$_mytel_admin_password" "$MYTEL_ONLINE_SIP_DRIVER")
     fi
     local status=$?
+    unset _mytel_db_password _mytel_admin_password
     [ "$status" = 0 ] || die "Native installation stopped (status $status). Inspect $MYTEL_NATIVE_WORK/netinstall.log."
 }
 

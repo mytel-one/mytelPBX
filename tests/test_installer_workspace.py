@@ -35,6 +35,7 @@ extract_bundle(){
         > "$native/release-media.py"
     printf '%s\\n' 'mytel_terminal_banner(){ :; }' > "$native/terminal-ui.sh"
     printf '%s\\n' 'mytel_collect_online_passwords(){ printf "%s\\n" Fixture-DB Fixture-Panel pjsip; }' \
+        'mytel_receive_online_passwords(){ read -r -u 3 _mytel_db_password && read -r -u 3 _mytel_admin_password && read -r -u 3 MYTEL_ONLINE_SIP_DRIVER; }' \\
         > "$native/online-credentials.sh"
 }
 bash(){
