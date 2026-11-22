@@ -64,3 +64,32 @@ class ReleaseMediaTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     RELEASE.unpack(archive, root/'verified', pin)
                 self.assertFalse((root/'verified').exists())
+
+    def test_supplement_adds_a_verified_file_and_replaces_inventory_only(self):
+        for collision in (False, True):
+            with self.subTest(collision=collision), tempfile.TemporaryDirectory() as temp, \
+                    patch.object(os, 'geteuid', create=True, return_value=FIXTURE_UID):
+                root = Path(temp)
+                archive, pin = self.make_archive(root)
+                with tarfile.open(archive, 'r:gz') as original:
+                    new = json.load(original.extractfile('manifest.json'))
+                name = 'desk.tgz' if collision else 'compat.rpm'
+                data = b'signed supplemental bytes'
+                new['files'][name] = dict(sha256=hashlib.sha256(data).hexdigest(), bytes=len(data))
+                manifest = json.dumps(new).encode()
+                second = root / 'supplement.tar.gz'
+                with tarfile.open(second, 'w:gz') as output:
+                    for key, payload in (('manifest.json', manifest), (name, data)):
+                        entry = tarfile.TarInfo(key)
+                        entry.size = len(payload)
+                        output.addfile(entry, io.BytesIO(payload))
+                pin['compat'] = dict(sha256=hashlib.sha256(second.read_bytes()).hexdigest(),
+                                     bytes=second.stat().st_size)
+                pin['manifest_sha256'] = hashlib.sha256(manifest).hexdigest()
+                if collision:
+                    with self.assertRaises(ValueError):
+                        RELEASE.unpack(archive, root / 'verified', pin, second)
+                    self.assertFalse((root / 'verified').exists())
+                else:
+                    RELEASE.unpack(archive, root / 'verified', pin, second)
+                    self.assertEqual((root / 'verified' / name).read_bytes(), data)

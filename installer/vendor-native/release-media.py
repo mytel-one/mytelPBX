@@ -18,6 +18,7 @@ import media
 
 
 ASSET = 'mytelpbx-install-media-rocky8.10-x86_64.tar.gz'
+COMPAT = 'mytelpbx-compat-rocky8.10-x86_64.tar.gz'
 RELEASE_URL = 'https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9/'
 MAX_ARCHIVE = 2 * 1024 ** 3 - 1
 MAX_EXPANDED = 4 * 1024 ** 3
@@ -25,11 +26,16 @@ MAX_EXPANDED = 4 * 1024 ** 3
 
 def read_pin(path):
     pin = json.loads(path.read_text(encoding='utf-8'))
-    if (not isinstance(pin, dict) or set(pin) != {'sha256', 'manifest_sha256', 'bytes'}
+    if (not isinstance(pin, dict) or set(pin) != {'sha256', 'manifest_sha256', 'bytes', 'compat'}
             or any(not isinstance(pin[key], str) or not re.fullmatch('[0-9a-f]{64}', pin[key])
                    for key in ('sha256', 'manifest_sha256'))
             or type(pin['bytes']) is not int or not 0 < pin['bytes'] <= MAX_ARCHIVE):
         raise ValueError('Invalid dependency release pin')
+    extra = pin['compat']
+    if (not isinstance(extra, dict) or set(extra) != {'sha256', 'bytes'}
+            or not isinstance(extra['sha256'], str) or not re.fullmatch('[0-9a-f]{64}', extra['sha256'])
+            or type(extra['bytes']) is not int or not 0 < extra['bytes'] <= MAX_ARCHIVE):
+        raise ValueError('Invalid supplemental release pin')
     return pin
 
 
@@ -39,7 +45,7 @@ def verify_archive(path, pin):
 
 
 def download(path, pin):
-    log = path.with_name('dependency-download.log')
+    log = path.with_name(path.name + '.log')
     part = path.with_suffix('.part')
     part.touch(mode=0o600, exist_ok=False)
     progress = '--progress-bar' if sys.stderr.isatty() else '--silent'
@@ -51,7 +57,7 @@ def download(path, pin):
                        '--proto', '=https', '--proto-redir', '=https', progress,
                        '--connect-timeout', '20', '--speed-limit', '1024', '--speed-time', '90',
                        '--max-time', '2700', '--max-filesize', str(pin['bytes']),
-                       '--continue-at', '-', '--output', str(part), RELEASE_URL + ASSET]
+                       '--continue-at', '-', '--output', str(part), RELEASE_URL + path.name]
             status = subprocess.call(options)
             report.write('attempt={} curl={} bytes={}\n'.format(attempt, status, part.stat().st_size))
             report.flush()
@@ -64,8 +70,10 @@ def download(path, pin):
     raise ValueError('Dependency transfer from GitHub failed; see ' + str(log))
 
 
-def unpack(archive, root, pin):
-    verify_archive(archive, pin)
+def unpack(archive, root, pin, supplemental=None):
+    parts = [(archive, pin)]
+    if supplemental is not None:
+        parts.append((supplemental, pin['compat']))
     if root.exists() or root.is_symlink():
         raise ValueError('Dependency workspace already exists')
     with tempfile.TemporaryDirectory(prefix='.media-', dir=str(root.parent)) as scratch:
@@ -73,23 +81,34 @@ def unpack(archive, root, pin):
         target.mkdir()
         seen = set()
         size = 0
-        with tarfile.open(str(archive), 'r|gz') as source:
-            for entry in source:
-                if len(seen) >= media.MAX_FILES + 1:
-                    raise ValueError('Too many release media files')
-                name = media.relative(entry.name)
-                if not entry.isdir() and (not entry.isreg() or entry.sparse is not None or name in seen
-                                          or not 0 < entry.size <= MAX_EXPANDED - size):
-                    raise ValueError('Invalid dependency archive entry')
-                path = target / name
-                if entry.isdir():
-                    path.mkdir(parents=True, exist_ok=True)
-                    continue
-                size += entry.size
-                seen.add(name)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with source.extractfile(entry) as incoming, path.open('xb') as outgoing:
-                    shutil.copyfileobj(incoming, outgoing, 1024 * 1024)
+        manifest_replaced = False
+        for index, (part, expected) in enumerate(parts):
+            verify_archive(part, expected)
+            with tarfile.open(str(part), 'r|gz') as source:
+                for entry in source:
+                    if len(seen) >= media.MAX_FILES + 1:
+                        raise ValueError('Too many release media files')
+                    name = media.relative(entry.name)
+                    # A release update may extend the inventory. All dependency
+                    # files in the main archive keep their original bytes.
+                    replace_manifest = (index == 1 and not manifest_replaced
+                                        and name == 'manifest.json' and name in seen)
+                    if not entry.isdir() and (not entry.isreg() or entry.sparse is not None
+                                              or (name in seen and not replace_manifest)
+                                              or not 0 < entry.size <= MAX_EXPANDED - size):
+                        raise ValueError('Invalid dependency archive entry')
+                    path = target / name
+                    if entry.isdir():
+                        path.mkdir(parents=True, exist_ok=True)
+                        continue
+                    size += entry.size
+                    if replace_manifest:
+                        path.unlink()
+                        manifest_replaced = True
+                    seen.add(name)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with source.extractfile(entry) as incoming, path.open('xb') as outgoing:
+                        shutil.copyfileobj(incoming, outgoing, 1024 * 1024)
         media.load(target, pin['manifest_sha256'], expected_uid=os.geteuid())
         target.rename(root)
 
@@ -109,9 +128,12 @@ def main():
         pin = read_pin(Path(__file__).with_name('release-media.json'))
         archive = work / ASSET
         download(archive, pin)
+        supplemental = work / COMPAT
+        download(supplemental, pin['compat'])
         root = work / 'release-media'
-        unpack(archive, root, pin)
+        unpack(archive, root, pin, supplemental)
         archive.unlink()
+        supplemental.unlink()
     except (OSError, ValueError, EOFError, tarfile.TarError) as error:
         print('MytelPBX: ' + str(error), file=sys.stderr)
         return 1

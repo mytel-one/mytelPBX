@@ -1,5 +1,9 @@
 {
   "bytes": 527474326,
   "sha256": "50546158cc07a2a1862bbd445774e0e1603fbe1e804d34f9f413edcc1e6e8f11",
-  "manifest_sha256": "5044dd0ae324b8cdcb0396265db086f29be976299bfe3cc56618fa6daf47b2a2"
+  "manifest_sha256": "ea952677b85fafd58f1593b66d1cc0b64ae11fafd29fa3fa5d558fe0b86cf46f",
+  "compat": {
+    "bytes": 47019325,
+    "sha256": "7cca14145e57d230d372392deaafdb05dcc16b42c565397009ec8729f6e20856"
+  }
 }
