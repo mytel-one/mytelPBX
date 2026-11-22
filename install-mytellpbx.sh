@@ -12,7 +12,7 @@ MYTELLPBX_BUNDLE="mytelpbx-bundle-7.7.0.tgz"
 # Immutable payload pin from the reviewed clean-source bundle assembly.
 MYTELLPBX_BUNDLE_SHA256="bebd6c43282bde542b9e280462ce91933d1183997e42f62267c538d5c758c4fd"
 MYTELLPBX_GITHUB="https://github.com/mytel-one/mytelPBX"
-MYTELLPBX_RELEASE_TAG="v7.7.0-r9"
+MYTELLPBX_RELEASE_TAG="v7.7.0-r9.1"
 MYTELLPBX_BUNDLE_URL="${MYTELL_BUNDLE_URL:-${MYTELLPBX_GITHUB}/releases/download/${MYTELLPBX_RELEASE_TAG}/${MYTELLPBX_BUNDLE}}"
 
 die() { printf '\nMytelPBX: %s\n' "$*" >&2; exit 1; }

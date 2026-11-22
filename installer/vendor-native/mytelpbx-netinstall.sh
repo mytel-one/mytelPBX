@@ -143,8 +143,19 @@ function additional_packages
 
 function install_base_packages
 {
-  local packages
+  local packages dahdi_config=/etc/dahdi/system.conf
   packages=$(cat "${MYTEL_NATIVE_WORK}/inst1.txt") || return $?
+  # The legacy RPM generates spans before loading the DAHDI driver. Start a
+  # fresh software PBX with the signed dahdi-tools sample's zero-span defaults.
+  if [[ ! -e $dahdi_config && ! -L $dahdi_config ]]; then
+    [[ ! -L ${dahdi_config%/*} ]] || return 1
+    (
+      umask 022
+      mkdir -p -- "${dahdi_config%/*}" || exit $?
+      set -o noclobber
+      printf '%s\n' 'loadzone=us' 'defaultzone=us' > "$dahdi_config"
+    ) || return $?
+  fi
   mytel_package_batch "$packages" core
 }
 

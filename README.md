@@ -16,14 +16,14 @@
 
 ## نصب آنلاین با یک خط
 
-برای نسخهٔ `v7.7.0-r9`، در ترمینال تعاملی سرور تازه و با دسترسی
+برای نسخهٔ `v7.7.0-r9.1`، در ترمینال تعاملی سرور تازه و با دسترسی
 root اجرا کنید. فایل ابتدا دریافت و سپس با Bash اجرا می‌شود؛ ترمینال برای
 پنجره‌های بومی در دسترس می‌ماند:
 
 </div>
 
 ```bash
-curl -fsSL -o install-mytellpbx.sh https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9/install-mytellpbx.sh && bash install-mytellpbx.sh
+curl -fsSL -o install-mytellpbx.sh https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9.1/install-mytellpbx.sh && bash install-mytellpbx.sh
 ```
 
 <div dir="rtl">

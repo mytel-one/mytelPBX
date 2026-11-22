@@ -29,6 +29,7 @@ class NativeFunctionFailureTests(unittest.TestCase):
                                                     (self.base / 'redhat-release').as_posix())
         self.definitions = self.definitions.replace('/etc/dnf/dnf.conf',
                                                     (self.base / 'dnf.conf').as_posix())
+        self.definitions = self.definitions.replace('/etc/dahdi', (self.base / 'dahdi').as_posix())
         (self.base / 'redhat-release').write_text('Rocky Linux release 8.10 (Green Obsidian)\n')
         (self.base / 'dnf.conf').write_text('[main]\n')
 
@@ -120,6 +121,30 @@ printf 'CONTINUED\\n'
         self.assertIn(b'[04/09]  Installing base packages', result.stdout)
         self.assertIn(b'Stopped', result.stderr)
         self.assertNotIn(b'CONTINUED', result.stdout)
+
+    def test_base_batch_has_native_dahdi_defaults_before_package_scriptlet(self):
+        (self.base / 'inst1.txt').write_text('asterisk20\n')
+        result = self.shell('''
+mytel_package_batch(){
+  test "$*" = 'asterisk20 core' || return 76
+  test -s "$MYTEL_NATIVE_WORK/dahdi/system.conf" || return 77
+}
+install_base_packages
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.base / 'dahdi/system.conf').read_text(), 'loadzone=us\ndefaultzone=us\n')
+
+    def test_base_batch_preserves_dahdi_configuration_and_package_errors(self):
+        (self.base / 'inst1.txt').write_text('asterisk20\n')
+        config = self.base / 'dahdi/system.conf'
+        config.parent.mkdir()
+        config.write_text('fxsks=1\nloadzone=uk\n')
+        result = self.shell('''
+mytel_package_batch(){ return 78; }
+install_base_packages
+''')
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertEqual(config.read_text(), 'fxsks=1\nloadzone=uk\n')
 
     def test_product_package_floors_stay_single_dnf_arguments_and_are_rechecked(self):
         shell = '''

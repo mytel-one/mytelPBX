@@ -1,6 +1,6 @@
 # MytelPBX 7.7.0 revision 9 installation
 
-Revision 9 uses tag `v7.7.0-r9`. The online installer runs in English and sets the
+Revision 9 uses tag `v7.7.0-r9.1`. The online installer runs in English and sets the
 web panel to Persian from the first sign-in. The
 [revision 3 record](releases/7.7.0/revision-3.md) covers the earlier release.
 
@@ -10,7 +10,7 @@ Use a **fresh Rocky Linux 8.10 Minimal x86_64 server**, root access, an interact
 console or SSH terminal, and working Internet access. To install the published revision, run:
 
 ```bash
-curl -fsSL -o install-mytellpbx.sh https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9/install-mytellpbx.sh && bash install-mytellpbx.sh
+curl -fsSL -o install-mytellpbx.sh https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9.1/install-mytellpbx.sh && bash install-mytellpbx.sh
 ```
 
 The script is downloaded to a file before Bash starts, so setup retains
@@ -22,12 +22,15 @@ The native sequence includes:
 
 1. MariaDB `root` and panel `admin` passwords and their confirmations.
 2. Primary SIP driver choice. Enter selects PJSIP, or choose SIP.
-3. Native repositories and OS update with terminal package progress.
+3. Local verified package repositories and required packages with terminal progress.
 4. Asterisk **20** and Community Realtime Block List (`issabel-packetbl`).
 5. Native setup applies the confirmed passwords and selected SIP driver.
 6. The shared Mytel branding/Desk add-on after native setup succeeds.
 7. Native cleanup, an independent Desk doctor check, completion and **automatic
    reboot** on online success.
+
+A fresh software-only install sets the native zero-span DAHDI defaults. Physical
+telephony cards require their vendor firmware and separate span setup and testing.
 
 During startup the terminal reports elapsed time and pending services every 30 seconds.
 Before changing the add-on state, a bounded 300-second wait checks the actual
