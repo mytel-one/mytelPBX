@@ -14,6 +14,7 @@ SOURCE = Path(__file__).resolve().parents[1] / 'installer/vendor-native/release-
 SPEC = importlib.util.spec_from_file_location('release_media', str(SOURCE))
 RELEASE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RELEASE)
+FIXTURE_UID = getattr(os, 'geteuid', lambda: 0)()
 
 
 class ReleaseMediaTests(unittest.TestCase):
@@ -46,7 +47,7 @@ class ReleaseMediaTests(unittest.TestCase):
                          'bytes': archive.stat().st_size, 'manifest_sha256': hashlib.sha256(raw).hexdigest()}
 
     def test_extracts_verified_local_media(self):
-        with tempfile.TemporaryDirectory() as temp, patch.object(os, 'geteuid', create=True, return_value=0):
+        with tempfile.TemporaryDirectory() as temp, patch.object(os, 'geteuid', create=True, return_value=FIXTURE_UID):
             root = Path(temp)
             archive, pin = self.make_archive(root)
             RELEASE.unpack(archive, root/'verified', pin)
@@ -55,7 +56,7 @@ class ReleaseMediaTests(unittest.TestCase):
     def test_refuses_links_and_wrong_pin_without_exposing_a_partial_depot(self):
         for kind in ('symlink', 'pin'):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temp, \
-                    patch.object(os, 'geteuid', create=True, return_value=0):
+                    patch.object(os, 'geteuid', create=True, return_value=FIXTURE_UID):
                 root = Path(temp)
                 archive, pin = self.make_archive(root, extra='escape' if kind == 'symlink' else None)
                 if kind == 'pin':
