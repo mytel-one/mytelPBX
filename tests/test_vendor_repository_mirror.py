@@ -61,17 +61,20 @@ class VendorRepositoryTests(unittest.TestCase):
         self.assertEqual(builds['baseurl'], (self.state / 'repository').as_uri())
         self.assertEqual(builds['gpgcheck'], '1')
         self.assertEqual(builds['skip_if_unavailable'], '0')
-        self.assertEqual(builds['includepkgs'], 'asterisk20,asterisk20-*,dahdi-firmware,xtables-addons,issabel-geoip')
-        self.assertEqual(builds['gpgkey'], project_key)
+        project_filter = 'asterisk20,asterisk20-*,dahdi-firmware,xtables-addons,issabel-geoip,issabel-security'
+        security_key = (self.state / 'mytelpbx-rpm-security.asc').as_uri()
+        self.assertEqual(builds['includepkgs'], project_filter)
+        self.assertEqual(set(builds['gpgkey'].split()), {project_key, security_key})
         source = config['mytelpbx-packages']
         self.assertEqual(source['baseurl'], (self.state / 'repository').as_uri())
         self.assertEqual(source['gpgcheck'], '1')
         self.assertEqual(source['skip_if_unavailable'], '0')
         self.assertNotIn(project_key, source['gpgkey'])
-        self.assertEqual(source['excludepkgs'], 'asterisk20,asterisk20-*,dahdi-firmware,xtables-addons,issabel-geoip')
+        self.assertNotIn(security_key, source['gpgkey'])
+        self.assertEqual(source['excludepkgs'], project_filter)
         for name, digest in MIRROR.KEYS.items():
             key = self.state / name
-            section = builds if name == MIRROR.PROJECT_KEY else source
+            section = builds if key.as_uri() in (project_key, security_key) else source
             self.assertIn(key.as_uri(), section['gpgkey'].split())
             self.assertEqual(hashlib.sha256(key.read_bytes()).hexdigest(), digest)
 
@@ -109,7 +112,7 @@ class VendorRepositoryTests(unittest.TestCase):
         ])
         self.assertEqual(len(calls), 2)
         for command in calls:
-            self.assertEqual(command[-1], 'https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9/' + MIRROR.ASSET)
+            self.assertEqual(command[-1], 'https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9.2/' + MIRROR.ASSET)
             self.assertIn('--continue-at', command)
             self.assertEqual(command[command.index('--proto-redir') + 1], '=https')
         self.assertFalse((self.work / (MIRROR.ASSET + '.part')).exists())
@@ -185,3 +188,12 @@ class VendorRepositoryTests(unittest.TestCase):
         (self.state / 'issabel.asc').write_bytes(b'unapproved')
         with self.assertRaisesRegex(ValueError, 'key differs'):
             self.configure(pin)
+
+    def test_rejects_old_panel_and_security_rpms_next_to_approved_revisions(self):
+        for filename in ('issabel-pbx-5.0.0-4.noarch.rpm', 'issabelPBX-2.12.0-5.noarch.rpm',
+                         'issabel-security-5.0.0-1.noarch.rpm'):
+            with self.subTest(filename=filename):
+                pin = self.make_archive(extra=[('Packages/' + filename, b'old fixture')])
+                with self.assertRaisesRegex(ValueError, 'pinned PBX package'):
+                    self.configure(pin)
+                self.assertFalse(list(self.repo.iterdir()))

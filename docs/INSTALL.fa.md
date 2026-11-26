@@ -1,6 +1,6 @@
 # نصب MytelPBX ۷٫۷٫۰ بازبینی ۹
 
-بازبینی ۹ با برچسب `v7.7.0-r9.1` نصاب آنلاین انگلیسی و پنل فارسی را ارائه می‌کند.
+بازبینی ۹ با برچسب `v7.7.0-r9.2` نصاب آنلاین انگلیسی و پنل فارسی را ارائه می‌کند.
 [گزارش بازبینی ۳](releases/7.7.0/revision-3.md) آزمون نصب نسخهٔ پیشین را پوشش می‌دهد.
 
 ## نصب آنلاین
@@ -9,7 +9,7 @@
 تعاملی کنسول یا SSH و اینترنت استفاده کنید. برای نصب نسخهٔ منتشرشده اجرا کنید:
 
 ```bash
-curl -fsSL -o install-mytellpbx.sh https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9.1/install-mytellpbx.sh && bash install-mytellpbx.sh
+curl -fsSL -o install-mytellpbx.sh https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9.2/install-mytellpbx.sh && bash install-mytellpbx.sh
 ```
 
 فایل ابتدا دریافت و سپس با Bash اجرا می‌شود تا ترمینال برای پنجره‌های بومی

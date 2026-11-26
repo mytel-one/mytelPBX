@@ -29,6 +29,27 @@ with their original notices. The project-built DAHDI firmware importer ships
 under its corresponding source RPM. Administrators obtain optional physical
 card firmware through the manufacturer's distribution.
 
+## R9.2 panel and certificate packages
+
+The R9.2 snapshot includes the two publisher-signed panel RPMs from the
+20261021 installation DVD and a Mytel build of `issabel-security` with the
+publisher's certificate input-validation fix. The corresponding source
+archives and security source RPM are in the R9.2 updated source asset. Source
+archives for the other packages are in the R9 package release.
+
+To prepare the security binary and source RPMs from the original source pinned
+in the build recipe, run the following on an RPM build machine.
+
+```bash
+python3 packaging/issabel-security/build-rpm.py \
+  security-c7f05b08535001ba45104dff15a381a04eb7c5fa.tar.gz \
+  /absolute/path/to/new-build-directory
+```
+
+Verify and sign the resulting RPMs with the R9.2 security release key before
+assembling the vendor archive. The installer checks repository RPM signatures
+and the complete archive checksum.
+
 ## Rebuild the country-data RPM
 
 Use Python 3, Perl with `Text::CSV_XS`, RPM build tools, `cpio` and GNU tar.

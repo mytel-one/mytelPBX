@@ -13,21 +13,28 @@ import sys
 import tarfile
 import tempfile
 
-RELEASE = 'https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9/'
+RELEASE = 'https://github.com/mytel-one/mytelPBX/releases/download/v7.7.0-r9.2/'
 ASSET = 'mytelpbx-vendor-el8-x86_64.tar.gz'
 FILES = ('Issabel.repo', 'Issabel5.repo', 'commercial-addons.repo')
 PROJECT_KEY = 'mytelpbx-rpm-signing.asc'
+SECURITY_KEY = 'mytelpbx-rpm-security.asc'
+PROJECT_KEYS = (PROJECT_KEY, SECURITY_KEY)
 PROJECT_RPM = 'Packages/dahdi-firmware-2.11.1-2.mytel.el8.noarch.rpm'
 XTABLES_RPM = 'Packages/xtables-addons-3.18-1dkms.mytel.el8.x86_64.rpm'
 GEOIP_RPM = 'Packages/issabel-geoip-1.6.12-3.mytel.el8.x86_64.rpm'
-PROJECT_FILTER = 'asterisk20,asterisk20-*,dahdi-firmware,xtables-addons,issabel-geoip'
+SECURITY_RPM = 'Packages/issabel-security-5.0.0-2.mytel.el8.noarch.rpm'
+PANEL_RPM = 'Packages/issabel-pbx-5.0.0-5.noarch.rpm'
+PBX_RPM = 'Packages/issabelPBX-2.12.0-6.noarch.rpm'
+PROJECT_FILTER = 'asterisk20,asterisk20-*,dahdi-firmware,xtables-addons,issabel-geoip,issabel-security'
+PINNED_PANEL = {'Packages/issabel-security-': SECURITY_RPM, 'Packages/issabel-pbx-': PANEL_RPM,
+                'Packages/issabelPBX-': PBX_RPM}
 ASTERISK_BUILD = '-20.12.0-3.mytel.el8.x86_64.rpm'
 ASTERISK_PARTS = ('', '-core', '-configs', '-dahdi', '-doc', '-odbc', '-voicemail', '-resample', '-curl',
                  '-devel', '-addons', '-addons-core', '-addons-bluetooth', '-addons-ooh323', '-addons-mysql')
 ESSENTIAL = {PROJECT_RPM, XTABLES_RPM, GEOIP_RPM, 'Packages/asterisk-pr-sounds-1.1-0.noarch.rpm',
              'Packages/asterisk-sounds-en-gsm-1.5-1.el7.centos.noarch.rpm', 'Packages/issabel-packetbl-1.0-3.x86_64.rpm',
-             'Packages/issabel-framework-5.0.0-6.noarch.rpm', 'Packages/issabel-pbx-5.0.0-4.noarch.rpm',
-             'Packages/issabelPBX-2.12.0-5.noarch.rpm', 'Packages/issabel-firstboot-5.0.0-2.noarch.rpm',
+             'Packages/issabel-framework-5.0.0-6.noarch.rpm', PANEL_RPM, PBX_RPM, SECURITY_RPM,
+             'Packages/issabel-firstboot-5.0.0-2.noarch.rpm',
              'Packages/issabel-config_helpers-5.0.0-1.noarch.rpm'}
 ESSENTIAL.update('Packages/asterisk20' + part + ASTERISK_BUILD for part in ASTERISK_PARTS)
 
@@ -37,6 +44,7 @@ ESSENTIAL.update('Packages/asterisk20' + part + ASTERISK_BUILD for part in ASTER
 KEYS = {
     'issabel.asc': 'f7eb76b75127d29c5e5aa33ca2b7504680592e0882af7aeea185eeffcd8b4a0d',
     PROJECT_KEY: '0f72ccbc23227524baf1990fa868b429eedf1e6669cb093c9521f27d07c98ca2',
+    SECURITY_KEY: '2a87faf7d73cc0b67a3e7da8282d2369df9a0f0cd6e8f5f419c45d9be815886a',
     'legacy-elastix.asc': '71de56885e8f5fb84b02bc31a5fa498d7f2f26df4b5ccc9debff536a0f3b67ba',
 }
 
@@ -185,6 +193,8 @@ def unpack(archive, state_dir, pin, metadata_only=False):
                     raise ValueError('Unexpected country database package in release')
                 if name.startswith('Packages/asterisk20-') and name not in ESSENTIAL:
                     raise ValueError('Unexpected Asterisk package from a different build')
+                if any(name.startswith(prefix) and name != approved for prefix, approved in PINNED_PANEL.items()):
+                    raise ValueError('Unexpected revision of a pinned PBX package')
                 seen.add(name)
                 packages += int(name.startswith('Packages/'))
                 # DNF makecache reads only metadata. Keep the authenticated archive
@@ -235,16 +245,16 @@ def configure(repo_dir, state_dir, workdir, pin):
     for key, data in keys.items():
         if not key.exists():
             atomic_write(key, data, 0o644)
-    # These project builds include Asterisk, the optional hardware importer
-    # and both native-format country data consumers.
+    # Scope the native publisher and the Mytel build keys to their packages.
     # Keep native and project RPMs disjoint when DNF selects package sources.
     base = ('baseurl={}\nenabled=1\ngpgcheck=1\nsslverify=1\nskip_if_unavailable=0\n'
             .format(repository.as_uri()))
-    native_keys = ' '.join(key.as_uri() for key in sorted(keys) if key.name != PROJECT_KEY)
+    native_keys = ' '.join(key.as_uri() for key in sorted(keys) if key.name not in PROJECT_KEYS)
+    project_keys = ' '.join((state_dir / name).as_uri() for name in PROJECT_KEYS)
     definition = ('[mytelpbx-packages]\nname=MytelPBX packages\n' + base +
                   'excludepkgs=' + PROJECT_FILTER + '\ngpgkey=' + native_keys +
                   '\n\n[mytelpbx-builds]\nname=MytelPBX builds\n' + base +
-                  'includepkgs=' + PROJECT_FILTER + '\ngpgkey=' + (state_dir / PROJECT_KEY).as_uri() + '\n').encode('ascii')
+                  'includepkgs=' + PROJECT_FILTER + '\ngpgkey=' + project_keys + '\n').encode('ascii')
     for filename in FILES:
         path = repo_dir / filename
         if path.exists() or path.is_symlink():
